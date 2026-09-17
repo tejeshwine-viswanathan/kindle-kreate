@@ -1,5 +1,5 @@
 # One command runs the whole stack locally: docker compose up --build
-# Then open http://localhost:8080
+# Then open http://kindle-kreate.localhost:8080  (or http://localhost:8080)
 #
 #   web     nginx serving the built frontend, proxying /api to the API
 #   api     FastAPI: accepts uploads, reports progress, serves downloads
@@ -62,7 +62,7 @@ services:
   web:
     build: ./frontend
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     depends_on:
       api:
         condition: service_healthy

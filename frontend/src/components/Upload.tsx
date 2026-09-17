@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Conversion } from "../formats";
+import { BookIcon, CloseIcon, PageIcon, UploadIcon } from "./Icons";
 
 export const MAX_UPLOAD_MB = 500;
 const PAGE_COUNT_LIMIT_MB = 100; // parsing huge files client-side just for a count isn't worth it
@@ -78,6 +79,8 @@ export default function Upload({ conversion, onSubmit }: Props) {
     setRejected([]);
   }
 
+  const FileIcon = conversion.from === "PDF" ? PageIcon : BookIcon;
+
   return (
     <div className="space-y-4">
       <button
@@ -93,17 +96,26 @@ export default function Upload({ conversion, onSubmit }: Props) {
           setDragging(false);
           add(e.dataTransfer.files);
         }}
-        className={`flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 transition-colors ${
-          dragging ? "border-indigo-500 bg-indigo-50" : "border-slate-300 bg-white hover:border-slate-400"
+        className={`group flex w-full flex-col items-center gap-3 rounded-3xl border-2 border-dashed px-6 py-12 transition-all duration-200 ${
+          dragging
+            ? "scale-[1.01] border-teal bg-teal-soft"
+            : "border-cream-3 bg-white/60 hover:border-ink-3 hover:bg-white"
         }`}
       >
-        <span className="text-4xl" aria-hidden>
-          {conversion.from === "PDF" ? "📄" : "📘"}
+        <span
+          className={`flex h-14 w-14 items-center justify-center rounded-2xl transition-colors ${
+            dragging ? "bg-teal text-cream" : "bg-cream-2 text-ink-2 group-hover:bg-teal-soft group-hover:text-teal"
+          }`}
+        >
+          <UploadIcon width={26} height={26} />
         </span>
-        <span className="font-medium text-slate-800">
-          Drop {conversion.from} files here or click to choose
+        <span className="font-display text-xl font-semibold text-ink">
+          {dragging ? "Let go!" : `Drop ${article(conversion.from)} ${conversion.from} here`}
         </span>
-        <span className="text-sm text-slate-500">Several at once is fine · up to {MAX_UPLOAD_MB} MB each</span>
+        <span className="text-sm text-ink-2">
+          or <span className="font-bold text-teal underline underline-offset-4">browse your files</span>
+          <span className="text-ink-3"> · several at once is fine, up to {MAX_UPLOAD_MB} MB each</span>
+        </span>
       </button>
       <input
         ref={inputRef}
@@ -118,9 +130,9 @@ export default function Upload({ conversion, onSubmit }: Props) {
       />
 
       {rejected.length > 0 && (
-        <div role="alert" className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-          <p className="font-medium">Skipped {rejected.length === 1 ? "1 file" : `${rejected.length} files`}:</p>
-          <ul className="list-inside list-disc">
+        <div role="alert" className="rounded-2xl bg-rose-soft px-4 py-3 text-sm text-rose-deep">
+          <p className="font-bold">Skipped {rejected.length === 1 ? "1 file" : `${rejected.length} files`}</p>
+          <ul className="mt-1 list-inside list-disc">
             {rejected.map((r, i) => (
               <li key={i} className="break-words">
                 {r}
@@ -131,36 +143,38 @@ export default function Upload({ conversion, onSubmit }: Props) {
       )}
 
       {staged.length > 0 && (
-        <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-          <ul className="divide-y divide-slate-100">
+        <div className="card overflow-hidden animate-rise">
+          <ul className="divide-y divide-cream-3">
             {staged.map((s) => (
-              <li key={s.key} className="flex items-center justify-between gap-3 px-4 py-3">
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-slate-800">{s.file.name}</p>
-                  <p className="text-sm text-slate-500">
+              <li key={s.key} className="flex items-center gap-4 px-5 py-3.5">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cream-2 text-ink-2">
+                  <FileIcon />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-bold text-ink">{s.file.name}</p>
+                  <p className="text-sm text-ink-2">
                     {formatSize(s.file.size)}
-                    {s.pages === undefined && " · counting pages…"}
+                    {s.pages === undefined && <span className="text-ink-3"> · counting pages…</span>}
                     {typeof s.pages === "number" && ` · ${s.pages} page${s.pages === 1 ? "" : "s"}`}
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setStaged((list) => list.filter((x) => x.key !== s.key))}
-                  className="shrink-0 rounded-md px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-cream-2 hover:text-ink"
                   aria-label={`Remove ${s.file.name}`}
                 >
-                  ✕
+                  <CloseIcon width={16} height={16} />
                 </button>
               </li>
             ))}
           </ul>
-          <div className="flex justify-end border-t border-slate-100 px-4 py-3">
-            <button
-              type="button"
-              onClick={submit}
-              className="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-700"
-            >
-              Convert {staged.length === 1 ? "1 file" : `${staged.length} files`} to {conversion.to}
+          <div className="flex items-center justify-between gap-3 border-t border-cream-3 bg-coffee-soft/30 px-5 py-3.5">
+            <p className="text-sm text-ink-2">
+              {staged.length === 1 ? "1 file" : `${staged.length} files`} ready
+            </p>
+            <button type="button" onClick={submit} className="btn-main">
+              Convert to {conversion.to}
             </button>
           </div>
         </div>

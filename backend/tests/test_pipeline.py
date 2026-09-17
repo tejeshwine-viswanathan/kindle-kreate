@@ -248,3 +248,46 @@ def test_text_layer_over_scan_is_marked_ocr(tmp_path):
             page.insert_text((72, 120 + i * 15), f"Line {i} of the OCR text layer sits on top of the scan.", fontsize=11)
 
     assert _pages(make_pdf(tmp_path / "ia.pdf", build), tmp_path)[0].source == "ocr"
+
+
+def test_ocr_headings_must_read_like_words():
+    from app.tasks.structure import _reads_like_words, heading_level
+
+    for junk in ["M&", "CrRCULATION", "ITU ^->", "H H", "iy Hy Name of School...~nW0 -LTee at KA", "4H"]:
+        assert not _reads_like_words(junk), junk
+    for real in ["ADVENTURES OF SHERLOCK HOLMES", "CHAPTER XLIX.", "The Red-Headed League", "A. CONAN DOYLE", "Mr. Bennet's Reply", "Part II", "McDonald's Farm"]:
+        assert _reads_like_words(real), real
+    big = Block(kind="text", bbox=(0, 0, 200, 20), lines=[Line(text="ITU ^->", bbox=(0, 0, 200, 20), font_size=20)])
+    assert heading_level(big, 9.5) == 1 and heading_level(big, 9.5, noisy=True) is None
+
+
+def test_author_list_on_title_page_is_not_headings():
+    from app.tasks.structure import demote_heading_runs
+
+    def blk(text, y):
+        return Block(kind="text", bbox=(0, y, 200, y + 12), lines=[Line(text=text, bbox=(0, y, 200, y + 12), font_size=12)])
+
+    title = blk("Attention Is All You Need", 0)
+    authors = [blk("Ashish Vaswani", 30), blk("Noam Shazeer", 60), blk("Niki Parmar", 90), blk("Jakob Uszkoreit", 120)]
+    def affiliation(org, mail, y):  # two lines, as PyMuPDF reports them
+        return Block(kind="text", bbox=(0, y, 200, y + 24), lines=[Line(text=org, bbox=(0, y, 200, y + 12), font_size=10), Line(text=mail, bbox=(0, y + 12, 200, y + 24), font_size=10)])
+
+    affiliations = [affiliation("Google Brain", "avaswani@google.com", 45), affiliation("Google Brain", "noam@google.com", 75), affiliation("Google Research", "nikip@google.com", 105)]
+    abstract = blk("Abstract", 150)
+    body = blk("The dominant sequence transduction models are based on complex recurrent networks.", 165)
+    intro = blk("1 Introduction", 200)
+    blocks = [title, authors[0], affiliations[0], authors[1], affiliations[1], authors[2], affiliations[2], authors[3], abstract, body, intro]
+    levels = {id(b): None for b in blocks}
+    levels.update({id(title): 1, **{id(a): 2 for a in authors}, id(abstract): 2, id(intro): 2})
+    demote_heading_runs(levels, blocks)
+    assert levels[id(title)] == 1 and all(levels[id(a)] is None for a in authors)
+    assert levels[id(abstract)] == 2 and levels[id(intro)] == 2
+
+
+def test_short_all_caps_ocr_fragments_are_not_headings():
+    from app.tasks.structure import _plausible_ocr_title
+
+    for junk in ["OT", "NE", "A", "of whom he had", "made up my mind"]:
+        assert not _plausible_ocr_title(junk), junk
+    for real in ["CHAPTER XL", "XLIX.", "L", "CONTENTS", "The two young ladies", "Chapter 3"]:
+        assert _plausible_ocr_title(real), real

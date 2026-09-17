@@ -1,10 +1,16 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createJob, deleteJob } from "../api";
 import type { Conversion } from "../formats";
 import JobItem, { type Item } from "./JobItem";
 import Upload from "./Upload";
 
-export default function Converter({ conversion }: { conversion: Conversion }) {
+interface Props {
+  conversion: Conversion;
+  /** reports how many uploads/conversions are currently running */
+  onActiveChange?: (count: number) => void;
+}
+
+export default function Converter({ conversion, onActiveChange }: Props) {
   const [items, setItems] = useState<Item[]>([]);
   const nextKey = useRef(0);
 
@@ -53,36 +59,43 @@ export default function Converter({ conversion }: { conversion: Conversion }) {
   }
 
   const finished = items.filter((item) => item.phase === "done" || item.phase === "failed");
+  const active = items.length - finished.length;
+  const activeChange = useRef(onActiveChange);
+  activeChange.current = onActiveChange;
+  useEffect(() => activeChange.current?.(active), [active]);
 
   return (
-    <section className="space-y-4" aria-labelledby={`${conversion.kind}-title`}>
-      <div className="space-y-1">
-        <h2 id={`${conversion.kind}-title`} className="text-xl font-semibold text-slate-900">
-          {conversion.from} to {conversion.to}
-        </h2>
-        <p className="text-slate-600">{conversion.description}</p>
-      </div>
+    <section className="space-y-5 animate-rise" aria-labelledby={`${conversion.kind}-title`}>
+      <h2 id={`${conversion.kind}-title`} className="sr-only">
+        {conversion.from} to {conversion.to}
+      </h2>
+      <p className="text-center text-coffee">{conversion.description}</p>
 
       <Upload conversion={conversion} onSubmit={submit} />
 
       {items.length > 0 && (
-        <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2">
-            <p className="text-sm font-medium text-slate-600">
-              {items.length - finished.length > 0 ? `${items.length - finished.length} in progress · ` : ""}
-              {finished.length} finished
+        <div className="card overflow-hidden animate-rise">
+          <div className="flex items-center justify-between border-b border-cream-3 bg-coffee-soft/30 px-5 py-3">
+            <p className="text-sm font-bold text-ink-2">
+              {active > 0 && (
+                <span className="text-teal">
+                  {active} in progress
+                  {finished.length > 0 && <span className="text-ink-3"> · </span>}
+                </span>
+              )}
+              {finished.length > 0 && <span>{finished.length} finished</span>}
             </p>
             {finished.length > 1 && (
               <button
                 type="button"
                 onClick={() => finished.forEach(dismiss)}
-                className="text-sm font-medium text-slate-500 hover:text-slate-800"
+                className="text-sm font-bold text-ink-3 underline-offset-4 hover:text-ink hover:underline"
               >
                 Clear finished
               </button>
             )}
           </div>
-          <ul className="divide-y divide-slate-100">
+          <ul className="divide-y divide-cream-3">
             {items.map((item) => (
               <JobItem
                 key={item.key}

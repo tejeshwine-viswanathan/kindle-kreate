@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY scripts ./scripts
 RUN python scripts/fetch_epubcheck.py
+# keeps one EPUBCheck JVM warm per process (see app/tasks/validate.py)
+COPY tools/epubcheck-server ./tools/epubcheck-server
 
 COPY app ./app
 ENV PDF2EPUB_DATA_DIR=/data

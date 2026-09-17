@@ -1,1 +1,113 @@
 @import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
+  --font-sans: "Nunito", "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --color-cream: #fbf7f1;
+  --color-cream-2: #f3ece2;
+  --color-cream-3: #e6d9c8;
+  --color-ink: #2b2521;
+  --color-ink-2: #6b5548;
+  --color-ink-3: #a08a78;
+  --color-teal: #2e6b66;
+  --color-teal-2: #24564f;
+  --color-teal-soft: #dfeae6;
+  --color-sage: #6f9a7a;
+  --color-sage-soft: #e3efe4;
+  --color-butter: #f6d97a;
+  --color-butter-soft: #fdf3d0;
+  --color-coffee: #6b4c36;
+  --color-coffee-2: #4a3325;
+  --color-coffee-soft: #ead9c8;
+  --color-rose-soft: #fbe3e1;
+  --color-rose-deep: #b8433a;
+
+  --shadow-soft: 0 1px 2px rgba(60, 40, 20, 0.05), 0 8px 24px -12px rgba(60, 40, 20, 0.18);
+  --shadow-lift: 0 2px 4px rgba(60, 40, 20, 0.06), 0 16px 36px -14px rgba(60, 40, 20, 0.25);
+
+  --animate-rise: rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-bob: bob 4s ease-in-out infinite;
+  --animate-slide: slide 1.2s ease-in-out infinite;
+  --animate-drop: drop 0.6s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes bob {
+    0%,
+    100% {
+      transform: translateY(0) rotate(-2deg);
+    }
+    50% {
+      transform: translateY(-6px) rotate(2deg);
+    }
+  }
+  @keyframes drop {
+    from {
+      opacity: 0;
+      transform: translateY(-16px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes slide {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(300%);
+    }
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  body {
+    @apply bg-cream font-sans text-ink antialiased;
+    background-image: radial-gradient(rgba(43, 37, 33, 0.07) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  ::selection {
+    @apply bg-butter text-ink;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@utility card {
+  @apply rounded-3xl border border-cream-3 bg-white shadow-soft;
+}
+
+@utility btn-main {
+  @apply inline-flex items-center justify-center gap-2 rounded-full bg-teal px-5 py-2.5 font-bold text-white shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:bg-teal-2 hover:shadow-lift active:translate-y-0;
+}
+
+@utility btn-quiet {
+  @apply inline-flex items-center justify-center gap-2 rounded-full border border-cream-3 bg-white px-4 py-2 text-sm font-bold text-ink-2 transition-colors hover:border-ink-3 hover:text-ink;
+}
+
+@utility wobble-l {
+  transform: rotate(-1.2deg);
+}
+@utility wobble-r {
+  transform: rotate(1.2deg);
+}

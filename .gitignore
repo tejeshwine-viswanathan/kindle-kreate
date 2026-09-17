@@ -222,5 +222,6 @@ node_modules/
 backend/data/
 *.tsbuildinfo
 
-# Downloaded tools (scripts/fetch_epubcheck.py)
-backend/tools/
+# Downloaded tools (scripts/fetch_epubcheck.py); the compiled EPUBCheck wrapper is ours and stays
+backend/tools/*
+!backend/tools/epubcheck-server/

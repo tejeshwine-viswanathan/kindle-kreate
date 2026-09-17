@@ -29,7 +29,7 @@ What the PDF → EPUB pipeline handles:
 - Unicode NFC normalization, ligature expansion, control-character cleanup
 - Long chapters split into multiple XHTML files so e-readers stay responsive
 - **One bad page never fails the book:** it becomes a notice in the EPUB and a warning in the job result
-- **EPUBCheck** runs on every generated file; an invalid EPUB fails the job with the validator's message instead of shipping
+- **EPUBCheck** runs on every generated file; an invalid EPUB fails the job with the validator's message instead of shipping. A tiny Java wrapper (`backend/tools/epubcheck-server`) keeps one EPUBCheck JVM warm per process, so validation takes well under a second instead of the ~5 s EPUBCheck needs to initialise on every run
 
 ## Layout
 
@@ -52,6 +52,7 @@ backend/            FastAPI + PyMuPDF + Tesseract + ebooklib
     epub_to_pdf.py    EPUB -> PDF (MuPDF layout + per-page rendering)
     pipeline.py       the stages (plan_pages / process_page / assemble), independent of the scheduler
   scripts/fetch_epubcheck.py   downloads EPUBCheck into backend/tools/
+  tools/epubcheck-server/       EpubCheckServer.java + .class: long-lived EPUBCheck JVM (compile with any JDK 11+)
   tests/              synthetic corpus with ground truth (tests/corpus.py), incl. "scanned" PDFs with skew/noise/blur
 frontend/           React + Vite + TypeScript + Tailwind
 docker-compose.yml  web + api + worker + valkey
@@ -85,14 +86,14 @@ Open the folder, install the recommended extensions, then pick a Run and Debug c
 - **Full stack:** API + Vite. Pages run on a process pool inside the API; nothing else needed.
 - **Full stack (Celery + Valkey):** API in Celery mode + a Celery worker + Vite. Starts a `kindle-kreate-valkey` Docker container automatically (the `Start Valkey` task).
 
-The app is at http://localhost:5173.
+The app is at http://kindle-kreate.localhost:5173 (or http://localhost:5173).
 
 ### Manually
 
 ```bash
 # local mode (default)
 cd backend && uvicorn app.main:app --port 8000
-cd frontend && npm run dev                   # http://localhost:5173, proxies /api to :8000
+cd frontend && npm run dev                   # http://kindle-kreate.localhost:5173, proxies /api to :8000
 
 # Celery mode
 docker run -d --name kindle-kreate-valkey -p 6379:6379 valkey/valkey:8-alpine
@@ -105,11 +106,19 @@ PDF2EPUB_QUEUE=celery celery -A app.celery_app worker --loglevel=info --pool=thr
 ### Docker
 
 ```bash
-docker compose up --build                     # http://localhost:8080
+docker compose up --build                     # http://kindle-kreate.localhost:8080
 docker compose up --build --scale worker=3    # more page throughput
 ```
 
 The images include Tesseract, a JRE and EPUBCheck, so scanned PDFs and validation work out of the box. Jobs and files live in the `pdf2epub-data` volume.
+
+### Local host name
+
+The app answers at **http://kindle-kreate.localhost:8080** (Docker) and **http://kindle-kreate.localhost:5173** (dev). Windows 11 and all major browsers resolve any `*.localhost` name to your own machine, so this needs no setup. If some tool on your machine cannot resolve it, add a hosts-file entry once (needs an admin prompt):
+
+```powershell
+.\scripts\add-hostname.ps1     # adds "127.0.0.1 kindle-kreate.localhost" to the hosts file
+```
 
 ## Tests
 

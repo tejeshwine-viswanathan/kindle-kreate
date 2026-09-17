@@ -33,6 +33,19 @@ HYPHENS = ("-", "\u00ad", "\u2010")
 # with a page number ("8 Acknowledgments 35"), or end in dot leaders ("Abstract ...... 1").
 TOC_ENTRY_RE = re.compile(r"^(\d+(\.\d+)*\s+\S.*\s\d+|.*\.{3,}\s*\d+)$")
 MAX_HEADING_CHARS = 120
+# On OCR pages a heading must read like words: tokens of letters with a vowel (or a short
+# function word), no OCR debris (digits inside words, stray symbols).
+WORDLIKE_RE = re.compile(r"^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*$")
+VOWELS = set("aeiouyAEIOUYàáâäèéêëìíîïòóôöùúûü")
+SHORT_WORDS = {"a", "i", "an", "of", "to", "in", "on", "by", "at", "or", "and", "the", "for", "mr", "mrs", "dr", "st"}
+DEBRIS_RE = re.compile(r"[^\w\s.,;:'’\"“”!?()&-]|\d[A-Za-z]|[A-Za-z]\d")
+# a capital inside a word ("CrRCULATION") is an OCR slip, except in Mc/Mac/O' names
+NAME_PREFIX_RE = re.compile(r"\b(Mc|Mac|O')(?=[A-Z])")
+INNER_CAPITAL_RE = re.compile(r"[a-z][A-Z]")
+# A run of this many short same-level heading candidates on one page, with no body text
+# between them, is a list (authors on a title page, a contents page), not headings.
+HEADING_RUN = 3
+HEADING_RUN_MAX_WORDS = 6
 # OCR pages (ours, or a scan's embedded text layer) below this confidence get no headings.
 MIN_HEADING_PAGE_CONFIDENCE = 60
 MAX_HEADING_LINES = 3
@@ -209,6 +222,68 @@ def demote_inline_headings(levels: dict[int, int | None], blocks: list[Block]) -
             levels[id(block)] = None
 
 
+STRICT_ROMAN_RE = re.compile(r"^M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})\.?$")
+
+
+def _plausible_ocr_title(text: str) -> bool:
+    """On OCR pages sizes lie, so the text itself must look like a title: real words, and
+    either 3+ of them, a "Chapter ..." line, or ALL CAPS with at least three letters (or a
+    roman numeral). Sentence fragments starting in lower case are never titles."""
+    if not _reads_like_words(text) or text[:1].islower():
+        return False
+    if CHAPTER_RE.match(text) or len(text.split()) >= 3:
+        return True
+    letters = sum(ch.isalpha() for ch in text)
+    return text.isupper() and (letters >= 3 or STRICT_ROMAN_RE.match(text) is not None)
+
+
+def _reads_like_words(text: str) -> bool:
+    if DEBRIS_RE.search(text) or INNER_CAPITAL_RE.search(NAME_PREFIX_RE.sub("", text)):
+        return False
+    tokens = [t.strip(".,;:!?()'’\"“”") for t in text.split()]
+    tokens = [t for t in tokens if t and not ROMAN_RE.match(t.lower()) and not t.isdigit()]
+    if not tokens:
+        return True
+    good = sum(
+        1 for t in tokens
+        if WORDLIKE_RE.match(t) and (t.lower() in SHORT_WORDS or (len(t) >= 2 and any(ch in VOWELS for ch in t)))
+    )
+    return good >= len(tokens) * 0.75
+
+
+def demote_heading_runs(levels: dict[int, int | None], blocks: list[Block]) -> None:
+    """Three or more short headings of one level in a row are a list, not headings: author
+    names on a paper's title page (each may be followed by a one-line affiliation), a
+    contents page. A heading directly followed by real body text is kept: it is that
+    text's heading."""
+    run: list[Block] = []
+    last_was_heading = False
+
+    def flush(keep_last: bool) -> None:
+        candidates = run[:-1] if keep_last else run
+        if len(candidates) >= HEADING_RUN:
+            for b in candidates:
+                levels[id(b)] = None
+        run.clear()
+
+    for block in blocks:
+        if block.kind != "text":
+            continue
+        level = levels.get(id(block))
+        if level is not None and len(block.text.split()) <= HEADING_RUN_MAX_WORDS:
+            if run and levels[id(run[-1])] != level:
+                flush(keep_last=False)
+            run.append(block)
+            last_was_heading = True
+            continue
+        if run and last_was_heading and level is None and len(block.lines) <= 2 and len(block.text) <= 80:
+            last_was_heading = False  # a short tail (affiliation + e-mail, page reference) stays in the run
+            continue
+        flush(keep_last=last_was_heading and level is None)
+        last_was_heading = False
+    flush(keep_last=False)
+
+
 def heading_level(block: Block, body_size: float, noisy: bool = False) -> int | None:
     """`noisy`: the sizes come from OCR boxes, so a lone oversized word ("He") is not
     evidence of a heading; demand a real title (3+ words, ALL CAPS, or "Chapter ...")."""
@@ -220,7 +295,7 @@ def heading_level(block: Block, body_size: float, noisy: bool = False) -> int | 
         or not any(ch.isalpha() for ch in text)
     ):
         return None
-    if noisy and len(text.split()) < 3 and not text.isupper() and not CHAPTER_RE.match(text):
+    if noisy and not _plausible_ocr_title(text):
         return None
     ratio = block.font_size / body_size
     if ratio >= 1.6 or (ratio >= 1.15 and CHAPTER_RE.match(text)):
@@ -343,6 +418,7 @@ def build_document(pages: list[PageResult], fallback_title: str, metadata_title:
         else:
             levels = {id(b): heading_level(b, body_size, noisy) for b in page.blocks if b.kind == "text"}
         demote_inline_headings(levels, page.blocks)
+        demote_heading_runs(levels, page.blocks)
         body_lines = [l for b in page.blocks if b.kind == "text" and levels[id(b)] is None for l in b.lines]
 
         for block in page.blocks:
