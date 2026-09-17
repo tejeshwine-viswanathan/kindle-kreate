@@ -38,6 +38,13 @@ FIGURE_MIN_WIDTH = 0.15  # fraction of page width
 FIGURE_MIN_HEIGHT = 0.06  # fraction of page height
 FIGURE_MAX_WIDTH_PX = 1600
 NOISE_WORD_RE = re.compile(r"^[^\w£$€%&@#]{1,3}$")
+# Lines below this mean confidence are Tesseract "reading" an illustration or scanner
+# noise ("‘Zz", "fay)"); genuine text on a poor scan still scores well above it.
+MIN_LINE_CONFIDENCE = 40
+# A page with fewer words than this at low overall confidence is an illustration page
+# (cover, frontispiece): its figures are kept, its "text" is not.
+SPARSE_PAGE_WORDS = 20
+SPARSE_PAGE_CONFIDENCE = 60
 
 
 class OcrUnavailable(RuntimeError):
@@ -132,6 +139,18 @@ def run_tesseract(img: np.ndarray, psm: int = 3) -> list[Word]:
         key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
         words.append(Word(text, conf, (x, y, x + w, y + h), key))
     return words
+
+
+def drop_noise(words: list[Word]) -> list[Word]:
+    """Remove lines Tesseract wasn't really reading, and the whole page's text when it
+    is only a handful of doubtful words on top of a picture."""
+    by_line: dict[tuple[int, int, int], list[Word]] = defaultdict(list)
+    for w in words:
+        by_line[w.key].append(w)
+    kept = [w for line in by_line.values() if mean_confidence(line) >= MIN_LINE_CONFIDENCE for w in line]
+    if len(kept) < SPARSE_PAGE_WORDS and mean_confidence(kept) < SPARSE_PAGE_CONFIDENCE:
+        return []
+    return kept
 
 
 def mean_confidence(words: list[Word]) -> float:
@@ -380,6 +399,7 @@ def ocr_page(page: pymupdf.Page, image_dir: Path) -> PageResult:
             rgb, bw = cv2.rotate(rgb, code), cv2.rotate(bw, code)
             words = run_tesseract(bw)
 
+    words = drop_noise(words)
     blocks: list[Block] = []
     for box in find_figures(bw, words):
         bbox = tuple(v * scale for v in box)

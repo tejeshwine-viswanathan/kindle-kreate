@@ -24,7 +24,7 @@ What the PDF → EPUB pipeline handles:
 - **Running headers/footers and page numbers** stripped (repeated margin text across pages)
 - **Headings → chapters + nested TOC** from font size/boldness relative to body text (OCR font sizes are estimated from letter shapes, so a line without descenders isn't mistaken for smaller type)
 - **Paragraph reconstruction:** wrapped lines joined, line-end hyphens removed (real compounds like "well-known" kept), paragraphs merged across column and page breaks, Tesseract's unreliable paragraph splits repaired by indentation
-- **Images** extracted at native resolution (text layer) or cropped from the scan (OCR) and placed in the text flow; exotic formats (JPX, JBIG2) converted to PNG
+- **Images** extracted from the text layer or cropped from the scan (OCR) and placed in the text flow; exotic formats (JPX, JBIG2) re-encoded, anything wider than 2000 px downscaled. The page-sized scan behind an OCR text layer (Internet Archive, Acrobat "searchable" PDFs) is recognised and dropped, so a 400-page scanned book gives a small EPUB, not a gigabyte of page pictures
 - **Tables:** simple ruled grids become HTML tables; anything more complex is kept as an image rather than mangled text
 - Unicode NFC normalization, ligature expansion, control-character cleanup
 - Long chapters split into multiple XHTML files so e-readers stay responsive

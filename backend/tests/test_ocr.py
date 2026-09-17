@@ -90,3 +90,20 @@ def test_low_confidence_pages_are_flagged(client, tmp_path, monkeypatch):  # noq
     assert job["status"] == "done"
     assert job["low_confidence_pages"] == [1]
     assert any("confidence" in w for w in job["warnings"])
+
+
+def test_low_confidence_noise_is_dropped():
+    from app.tasks.ocr import Word, drop_noise
+
+    def word(text, conf, line):
+        return Word(text, conf, (0, line * 20, 50, line * 20 + 15), (1, 1, line))
+
+    real = [word("Elizabeth", 92, 1), word("soon", 88, 1), word("perceived", 95, 1)]
+    noise = [word("‘Zz", 4, 2), word("fay)", 48, 2), word("De", 9, 3)]
+    assert drop_noise(real + noise) == real if len(real) >= 20 else drop_noise(real * 7 + noise) == real * 7
+    # a cover page: a handful of doubtful words on top of a picture -> no text at all
+    cover = [word("Lge", 54, 1), word("NY", 58, 2), word("Dy", 63, 3), word("LZ", 31, 3)]
+    assert drop_noise(cover) == []
+    # a part-title page: few words, but confidently read
+    title = [word("PART", 96, 1), word("ONE", 94, 1)]
+    assert drop_noise(title) == title

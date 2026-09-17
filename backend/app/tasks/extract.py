@@ -16,6 +16,14 @@ from .layout import order_blocks
 
 BOLD_FLAG = 1 << 4
 MIN_IMAGE_PX = 48  # smaller images are bullets/rules/decoration
+# Wider images are downscaled: e-readers don't show more, and a book of native-resolution
+# scans would run to gigabytes.
+MAX_IMAGE_PX = 2000
+JPEG_QUALITY = 85
+# An image covering this much of the page, with the page's text drawn over it, is the
+# scan behind an OCR text layer (Internet Archive, Acrobat "searchable" PDFs): the text
+# layer is what we want, the picture of it is not.
+BACKGROUND_COVERAGE = 0.5
 # A line whose font size differs from the previous one by more than this ratio
 # starts a new block (PyMuPDF often glues a heading onto the paragraph below it).
 FONT_BREAK_RATIO = 1.15
@@ -46,17 +54,48 @@ def store_image(data: bytes, ext: str, image_dir: Path) -> str:
 
 
 def _save_image(block: dict, image_dir: Path) -> str | None:
-    if block.get("width", 0) < MIN_IMAGE_PX or block.get("height", 0) < MIN_IMAGE_PX:
+    width, height = block.get("width", 0), block.get("height", 0)
+    if width < MIN_IMAGE_PX or height < MIN_IMAGE_PX:
         return None
     data: bytes = block["image"]
     ext = block.get("ext", "png").lower()
-    if ext not in EPUB_SAFE_EXTS:  # jpx, jb2, tiff, ... aren't supported by e-readers
-        try:
-            data = pymupdf.Pixmap(data).tobytes("png")
-        except Exception:
-            return None
-        ext = "png"
-    return store_image(data, "jpg" if ext == "jpeg" else ext, image_dir)
+    if ext in EPUB_SAFE_EXTS and width <= MAX_IMAGE_PX:
+        return store_image(data, "jpg" if ext == "jpeg" else ext, image_dir)
+    # jpx, jb2, tiff, ... aren't supported by e-readers; oversized images are shrunk
+    try:
+        data, ext = _reencode(pymupdf.Pixmap(data))
+    except Exception:
+        return None
+    return store_image(data, ext, image_dir)
+
+
+def _reencode(pix: pymupdf.Pixmap) -> tuple[bytes, str]:
+    """Shrink to MAX_IMAGE_PX wide; JPEG for colour/grey photos, PNG when there is
+    transparency or the image is bilevel (scanned line art compresses far better as PNG)."""
+    while pix.width > MAX_IMAGE_PX * 1.5:
+        pix.shrink(1)
+    if pix.width > MAX_IMAGE_PX:
+        scale = MAX_IMAGE_PX / pix.width
+        pix = pymupdf.Pixmap(pix, int(pix.width * scale), int(pix.height * scale), None)
+    if pix.colorspace is None or pix.colorspace.n not in (1, 3):  # CMYK, Lab, ...
+        pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+    if pix.alpha or pix.colorspace.n == 1:
+        return pix.tobytes("png"), "png"
+    return pix.tobytes("jpeg", jpg_quality=JPEG_QUALITY), "jpg"
+
+
+def _is_background(bbox: pymupdf.Rect, page_rect: pymupdf.Rect, raw_blocks: list[dict]) -> bool:
+    if bbox.get_area() < page_rect.get_area() * BACKGROUND_COVERAGE:
+        return False
+    inside = total = 0.0
+    for block in raw_blocks:
+        if block["type"] != 0:
+            continue
+        for line in block["lines"]:
+            rect = pymupdf.Rect(line["bbox"])
+            total += rect.get_area()
+            inside += (rect & bbox).get_area()
+    return total > 0 and inside >= total * 0.5
 
 
 def _same_baseline(left: Line, right: Line) -> bool:
@@ -152,12 +191,16 @@ def extract_page(page: pymupdf.Page, image_dir: Path) -> PageResult:
     raw = page.get_text("dict", flags=pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_LIGATURES)
     page_rect = page.rect
     blocks: list[Block] = []
+    ocr_layer = False  # text over a scan image is someone else's OCR: sizes are unreliable
 
     for raw_block in raw["blocks"]:
         bbox = pymupdf.Rect(raw_block["bbox"]) & page_rect
         if bbox.is_empty:
             continue
         if raw_block["type"] == 1:
+            if _is_background(bbox, page_rect, raw["blocks"]):
+                ocr_layer = True
+                continue
             name = _save_image(raw_block, image_dir)
             if name:
                 blocks.append(Block(kind="image", bbox=tuple(bbox), image=name))
@@ -172,6 +215,6 @@ def extract_page(page: pymupdf.Page, image_dir: Path) -> PageResult:
         index=page.number,
         width=page_rect.width,
         height=page_rect.height,
-        source="text",
+        source="ocr" if ocr_layer else "text",
         blocks=order_blocks(blocks),
     )

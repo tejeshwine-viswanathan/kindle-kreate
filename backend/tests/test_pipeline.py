@@ -156,3 +156,95 @@ def test_toc_entries_are_not_headings():
     assert heading_level(real, 10.0) == 3
     numbered = Block(kind="text", bbox=(0, 0, 300, 14), lines=[Line(text="3.2 Attention", bbox=(0, 0, 300, 14), font_size=12)])
     assert heading_level(numbered, 10.0) == 2
+
+
+def test_scan_background_behind_text_layer_is_dropped(tmp_path):
+    """Internet Archive / Acrobat-OCR PDFs: a full-page scan image with the OCR text on top."""
+    from .conftest import PAGE_H, PAGE_W
+
+    def build(doc):
+        page = doc.new_page(width=PAGE_W, height=PAGE_H)
+        pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 1200, 1550), False)
+        pix.set_rect(pix.irect, (235, 235, 225))
+        page.insert_image(page.rect, pixmap=pix)
+        for i in range(12):
+            page.insert_text((72, 120 + i * 15), f"Line {i} of the OCR text layer sits on top of the scan.", fontsize=11)
+
+    pages = _pages(make_pdf(tmp_path / "ia.pdf", build), tmp_path)
+    assert [b.kind for b in pages[0].blocks] == ["text"]
+    assert not any((tmp_path / "images").iterdir())
+
+
+def test_full_page_figure_without_text_is_kept(tmp_path):
+    def build(doc):
+        page = doc.new_page()
+        pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 400, 500), False)
+        pix.set_rect(pix.irect, (30, 120, 200))
+        page.insert_image(pymupdf.Rect(40, 40, 550, 700), pixmap=pix)
+        page.insert_text((72, 740), "Figure 1: a plate that fills the page.", fontsize=10)
+
+    pages = _pages(make_pdf(tmp_path / "plate.pdf", build), tmp_path)
+    assert [b.kind for b in pages[0].blocks] == ["image", "text"]
+
+
+def test_oversized_images_are_downscaled(tmp_path):
+    from app.tasks.extract import MAX_IMAGE_PX
+
+    def build(doc):
+        page = doc.new_page()
+        pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 4000, 3000), False)
+        pix.set_rect(pix.irect, (200, 30, 30))
+        page.insert_image(pymupdf.Rect(72, 72, 540, 423), stream=pix.tobytes("jpeg"))
+        page.insert_text((72, 500), "Caption under a very large photo.", fontsize=10)
+
+    pages = _pages(make_pdf(tmp_path / "big.pdf", build), tmp_path)
+    image = next(b for b in pages[0].blocks if b.kind == "image")
+    stored = pymupdf.Pixmap(str(tmp_path / "images" / image.image))
+    assert stored.width <= MAX_IMAGE_PX and image.image.endswith(".jpg")
+
+
+def test_oversized_first_word_beside_body_is_not_a_heading():
+    from app.tasks.structure import demote_inline_headings, heading_level
+
+    def blk(x0, y0, x1, y1, text, size):
+        return Block(kind="text", bbox=(x0, y0, x1, y1), lines=[Line(text=text, bbox=(x0, y0, x1, y1), font_size=size)])
+
+    body = 9.5
+    first_word = blk(17, 93, 59, 109, "He was", 11.6)
+    rest = blk(66, 98, 322, 112, "quite young, wonderfully handsome, extremely", 9.7)
+    column_heading = blk(17, 200, 150, 216, "3 Model Architecture", 12.0)
+    other_column = blk(180, 202, 322, 214, "body text in the right column", body)  # 30pt gutter
+    blocks = [first_word, rest, column_heading, other_column]
+    levels = {id(b): heading_level(b, body) for b in blocks}
+    assert levels[id(first_word)] == 2 and levels[id(column_heading)] == 2
+    demote_inline_headings(levels, blocks)
+    assert levels[id(first_word)] is None
+    assert levels[id(column_heading)] == 2  # a heading beside another column stays a heading
+
+
+def test_noisy_pages_need_real_titles_for_headings():
+    from app.tasks.structure import heading_level
+
+    def blk(text, size):
+        return Block(kind="text", bbox=(0, 0, 200, size), lines=[Line(text=text, bbox=(0, 0, 200, size), font_size=size)])
+
+    assert heading_level(blk("He", 12.9), 9.5) == 2  # a clean text layer is trusted
+    assert heading_level(blk("He", 12.9), 9.5, noisy=True) is None
+    assert heading_level(blk("Dy LZ", 25.6), 9.5, noisy=True) is None
+    assert heading_level(blk("CHAPTER", 15.6), 9.5, noisy=True) == 1
+    assert heading_level(blk("Chapter 3", 12.0), 9.5, noisy=True) == 1
+    assert heading_level(blk("The Red-Headed League", 15.0), 9.5, noisy=True) == 2
+
+
+def test_text_layer_over_scan_is_marked_ocr(tmp_path):
+    from .conftest import PAGE_H, PAGE_W
+
+    def build(doc):
+        page = doc.new_page(width=PAGE_W, height=PAGE_H)
+        pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 1200, 1550), False)
+        pix.set_rect(pix.irect, (235, 235, 225))
+        page.insert_image(page.rect, pixmap=pix)
+        for i in range(12):
+            page.insert_text((72, 120 + i * 15), f"Line {i} of the OCR text layer sits on top of the scan.", fontsize=11)
+
+    assert _pages(make_pdf(tmp_path / "ia.pdf", build), tmp_path)[0].source == "ocr"

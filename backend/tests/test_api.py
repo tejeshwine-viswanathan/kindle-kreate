@@ -99,15 +99,18 @@ def test_upload_rate_limit(client, tmp_path, monkeypatch):
 
 
 def test_active_job_cap(client, tmp_path, monkeypatch):
+    from app import storage
+    from app.models import JobState
+
     monkeypatch.setattr(settings, "max_active_jobs", 1)
     pdf = make_pdf(tmp_path / "book.pdf", book_pdf)
-    job_id = _upload(client, pdf).json()["job_id"]
-    from app import storage
-
-    storage.update_state(job_id, status="processing")  # hold one job open
+    # a job that is (as far as the API can tell) still running; never handed to the runner
+    held = "f" * 32
+    storage.job_dir(held).mkdir(parents=True)
+    storage.save_state(JobState(job_id=held, filename="held.pdf", status="processing", created_at=time.time()))
     res = _upload(client, pdf)
     assert res.status_code == 503 and "busy" in res.json()["detail"]
-    storage.update_state(job_id, status="done")
+    storage.update_state(held, status="done")
     assert _upload(client, pdf).status_code == 202
 
 

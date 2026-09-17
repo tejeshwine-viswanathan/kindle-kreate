@@ -33,6 +33,8 @@ HYPHENS = ("-", "\u00ad", "\u2010")
 # with a page number ("8 Acknowledgments 35"), or end in dot leaders ("Abstract ...... 1").
 TOC_ENTRY_RE = re.compile(r"^(\d+(\.\d+)*\s+\S.*\s\d+|.*\.{3,}\s*\d+)$")
 MAX_HEADING_CHARS = 120
+# OCR pages (ours, or a scan's embedded text layer) below this confidence get no headings.
+MIN_HEADING_PAGE_CONFIDENCE = 60
 MAX_HEADING_LINES = 3
 
 
@@ -187,7 +189,29 @@ def body_font_size(pages: list[PageResult]) -> float:
     return sizes.most_common(1)[0][0] if sizes else 10.0
 
 
-def heading_level(block: Block, body_size: float) -> int | None:
+def _beside(block: Block, other: Block) -> bool:
+    """`other` sits on the same line as `block`, right next to it (a word gap, not a column
+    gutter). OCR text layers box a paragraph's first word separately and oversize it."""
+    top, bottom = max(block.bbox[1], other.bbox[1]), min(block.bbox[3], other.bbox[3])
+    height = min(block.bbox[3] - block.bbox[1], other.bbox[3] - other.bbox[1])
+    if bottom - top < height * 0.5:
+        return False
+    gap = max(other.bbox[0] - block.bbox[2], block.bbox[0] - other.bbox[2])
+    return -height * 0.2 < gap < other.font_size * 1.2  # a word gap in the neighbour's text
+
+
+def demote_inline_headings(levels: dict[int, int | None], blocks: list[Block]) -> None:
+    text_blocks = [b for b in blocks if b.kind == "text"]
+    for block in text_blocks:
+        if levels.get(id(block)) is None:
+            continue
+        if any(other is not block and levels.get(id(other)) is None and _beside(block, other) for other in text_blocks):
+            levels[id(block)] = None
+
+
+def heading_level(block: Block, body_size: float, noisy: bool = False) -> int | None:
+    """`noisy`: the sizes come from OCR boxes, so a lone oversized word ("He") is not
+    evidence of a heading; demand a real title (3+ words, ALL CAPS, or "Chapter ...")."""
     text = block.text
     if (
         len(text) > MAX_HEADING_CHARS
@@ -195,6 +219,8 @@ def heading_level(block: Block, body_size: float) -> int | None:
         or text.endswith((".", ",", ";", ":"))
         or not any(ch.isalpha() for ch in text)
     ):
+        return None
+    if noisy and len(text.split()) < 3 and not text.isupper() and not CHAPTER_RE.match(text):
         return None
     ratio = block.font_size / body_size
     if ratio >= 1.6 or (ratio >= 1.15 and CHAPTER_RE.match(text)):
@@ -311,7 +337,12 @@ def build_document(pages: list[PageResult], fallback_title: str, metadata_title:
             tail = None
             continue
 
-        levels = {id(b): heading_level(b, body_size) for b in page.blocks if b.kind == "text"}
+        noisy = page.source == "ocr"
+        if noisy and page.confidence is not None and page.confidence < MIN_HEADING_PAGE_CONFIDENCE:
+            levels = {id(b): None for b in page.blocks if b.kind == "text"}
+        else:
+            levels = {id(b): heading_level(b, body_size, noisy) for b in page.blocks if b.kind == "text"}
+        demote_inline_headings(levels, page.blocks)
         body_lines = [l for b in page.blocks if b.kind == "text" and levels[id(b)] is None for l in b.lines]
 
         for block in page.blocks:
