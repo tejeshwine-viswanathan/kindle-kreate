@@ -141,3 +141,21 @@ Environment variables (backend):
 | `PDF2EPUB_EPUBCHECK` | `auto` | `auto`: validate when Java + EPUBCheck are present. `required`: fail jobs when they aren't. `off` |
 | `PDF2EPUB_EPUBCHECK_JAR` | `backend/tools/epubcheck/epubcheck.jar` | |
 | `PDF2EPUB_JAVA_CMD` | auto-detected | |
+| `PDF2EPUB_UPLOAD_RATE_PER_MINUTE` | `10` | Uploads per client address per minute; `0` disables |
+| `PDF2EPUB_MAX_ACTIVE_JOBS` | `20` | Jobs in flight across all clients before uploads get a 503; `0` disables |
+| `PDF2EPUB_TRUST_PROXY` | `false` | Read the client address from `X-Forwarded-For` (Compose sets this; nginx fills the header) |
+| `PDF2EPUB_AUTH_USER` / `PDF2EPUB_AUTH_PASSWORD` | unset | When both are set, `/api/*` requires HTTP Basic auth. Browsers prompt once and remember it |
+
+## Public deployments
+
+The stack is meant for your own machine, but if you expose it:
+
+```bash
+PDF2EPUB_AUTH_USER=me PDF2EPUB_AUTH_PASSWORD='a long passphrase' docker compose up -d
+```
+
+That puts a login on the API (the browser asks once), limits each address to 10 uploads a minute and caps in-flight jobs at 20. Put TLS in front (Caddy, Traefik, a cloud load balancer); the built-in nginx serves plain HTTP. To see how many workers you need:
+
+```bash
+python backend/scripts/load_test.py book.pdf --url http://localhost:8080 --jobs 8 --concurrency 4 --user me --password '...'
+```

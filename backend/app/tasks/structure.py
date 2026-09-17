@@ -12,15 +12,26 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 
 from ..schema import Block, Line, PageResult
 
-MARGIN_ZONE = 0.1  # top/bottom fraction of the page where running headers live
-PAGE_NUMBER_RE = re.compile(r"^(page\s+)?([0-9]+|[ivxlcdm]+)(\s+(of|/)\s+[0-9]+)?$", re.IGNORECASE)
+MARGIN_ZONE = 0.12  # top/bottom fraction of the page where running headers live
+# Signatures (see _signature) that are nothing but a page number.
+PAGE_NUMBER_SIGNATURES = {"#", "page #", "# of #", "# #", "p #"}
+ROMAN_RE = re.compile(r"^[ivxlcdm]{1,7}$")
+# OCR reads roman numerals with these look-alikes ("XX1", "xvi|", "xl!").
+ROMAN_LOOKALIKES = str.maketrans({"1": "i", "l": "i", "|": "i", "!": "i", "0": "o"})
+# Near-identical margin lines count as repeats (OCR noise: "INTRODUCTI0N", "xliti").
+FUZZY_MIN_CHARS = 10
+FUZZY_RATIO = 0.8
 CHAPTER_RE = re.compile(r"^(chapter|part|book|prologue|epilogue|appendix)\b", re.IGNORECASE)
 SENTENCE_END = tuple('.!?:;"”’)»…')
 HYPHENS = ("-", "\u00ad", "\u2010")
 
+# Table-of-contents entries look like headings but start with a section number and end
+# with a page number ("8 Acknowledgments 35"), or end in dot leaders ("Abstract ...... 1").
+TOC_ENTRY_RE = re.compile(r"^(\d+(\.\d+)*\s+\S.*\s\d+|.*\.{3,}\s*\d+)$")
 MAX_HEADING_CHARS = 120
 MAX_HEADING_LINES = 3
 
@@ -65,34 +76,103 @@ class Document:
 # --- running headers / footers -------------------------------------------------------
 
 
+def _is_page_token(token: str) -> bool:
+    return token.isdigit() or ROMAN_RE.match(token.translate(ROMAN_LOOKALIKES)) is not None
+
+
+def _lone_page_number(text: str) -> bool:
+    """A margin line that is one short token made (mostly) of roman-numeral letters, e.g.
+    "xliti" (OCR for xliii): not a valid numeral, but nothing else either."""
+    words = re.sub(r"[^\w\s]", " ", text.lower()).split()
+    if len(words) != 1 or len(words[0]) > 7:
+        return False
+    token = words[0].translate(ROMAN_LOOKALIKES)
+    return token.isdigit() or sum(ch in "ivxlcdm" for ch in token) >= 0.7 * len(token)
+
+
 def _signature(text: str) -> str:
-    return re.sub(r"\d+", "#", text.lower()).strip()
+    """Lower-cased words with page-number-like tokens replaced by '#', so "INTRODUCTION xix"
+    and "INTRODUCTION XX1" (OCR for xxi) look like the same running head. OCR look-alike
+    characters are folded inside words as well ("INTRODUCTI0N"); signatures are only ever
+    compared with each other, so the folding just has to be consistent."""
+    words = re.sub(r"[^\w\s]", " ", text.lower()).split()
+    return " ".join("#" if _is_page_token(w) else w.translate(ROMAN_LOOKALIKES) for w in words)
 
 
-def _in_margin(block: Block, page: PageResult) -> bool:
-    return block.bbox[3] <= page.height * MARGIN_ZONE or block.bbox[1] >= page.height * (1 - MARGIN_ZONE)
+def _in_margin(bbox: tuple[float, float, float, float], page: PageResult) -> bool:
+    return bbox[3] <= page.height * MARGIN_ZONE or bbox[1] >= page.height * (1 - MARGIN_ZONE)
+
+
+def _margin_lines(page: PageResult) -> list[tuple[Block, Line]]:
+    """Lines that could be running heads: a whole block in the margin, or the first/last
+    line of a block that starts or ends there (OCR often glues a header onto the body)."""
+    found = []
+    for block in page.blocks:
+        if block.kind != "text" or not block.lines:
+            continue
+        if _in_margin(block.bbox, page):
+            found.extend((block, line) for line in block.lines)
+        else:
+            edges = {id(block.lines[0]): block.lines[0], id(block.lines[-1]): block.lines[-1]}
+            found.extend((block, line) for line in edges.values() if _in_margin(line.bbox, page))
+    return found
+
+
+class _SignatureCounter:
+    """Counts signatures, folding near-identical ones together."""
+
+    def __init__(self) -> None:
+        self.counts: Counter[str] = Counter()
+
+    def canonical(self, signature: str) -> str:
+        if len(signature) >= FUZZY_MIN_CHARS:
+            for known in self.counts:
+                if len(known) >= FUZZY_MIN_CHARS and SequenceMatcher(None, signature, known).ratio() >= FUZZY_RATIO:
+                    return known
+        return signature
+
+    def add(self, signatures: set[str]) -> None:
+        for signature in signatures:
+            self.counts[self.canonical(signature)] += 1
+
+    def __getitem__(self, signature: str) -> int:
+        return self.counts[self.canonical(signature)]
 
 
 def strip_running_heads(pages: list[PageResult]) -> None:
     text_pages = [p for p in pages if p.blocks]
     min_repeats = max(2, min(3, math.ceil(len(text_pages) / 2)))
 
-    counts: Counter[str] = Counter()
+    counter = _SignatureCounter()
     for page in text_pages:
-        counts.update(
-            {_signature(b.text) for b in page.blocks if b.kind == "text" and _in_margin(b, page)}
-        )
+        counter.add({_signature(line.text) for _, line in _margin_lines(page)})
 
     for page in text_pages:
-        page.blocks = [
-            b
-            for b in page.blocks
-            if not (
-                b.kind == "text"
-                and _in_margin(b, page)
-                and (PAGE_NUMBER_RE.match(b.text) or counts[_signature(b.text)] >= min_repeats)
-            )
-        ]
+        doomed: set[int] = set()
+        for block, line in _margin_lines(page):
+            signature = _signature(line.text)
+            if (
+                signature in PAGE_NUMBER_SIGNATURES
+                or _lone_page_number(line.text)
+                or counter[signature] >= min_repeats
+            ):
+                doomed.add(id(line))
+        if not doomed:
+            continue
+        kept_blocks = []
+        for block in page.blocks:
+            if block.kind == "text" and any(id(l) in doomed for l in block.lines):
+                block.lines = [l for l in block.lines if id(l) not in doomed]
+                if not block.lines:
+                    continue
+                block.bbox = (
+                    min(l.bbox[0] for l in block.lines),
+                    min(l.bbox[1] for l in block.lines),
+                    max(l.bbox[2] for l in block.lines),
+                    max(l.bbox[3] for l in block.lines),
+                )
+            kept_blocks.append(block)
+        page.blocks = kept_blocks
 
 
 # --- headings ------------------------------------------------------------------------
@@ -119,6 +199,8 @@ def heading_level(block: Block, body_size: float) -> int | None:
     ratio = block.font_size / body_size
     if ratio >= 1.6 or (ratio >= 1.15 and CHAPTER_RE.match(text)):
         return 1
+    if TOC_ENTRY_RE.match(text):
+        return None
     if ratio >= 1.2:
         return 2
     if block.bold and ratio >= 0.95 and len(text) <= 80 and len(block.lines) == 1:

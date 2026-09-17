@@ -7,7 +7,8 @@ import zipfile
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.config import settings
+from app.main import app, uploads
 
 from .conftest import book_pdf, make_pdf, scanned_pdf
 
@@ -83,3 +84,42 @@ def test_delete_job(client, tmp_path, data_dir):
     assert client.delete(f"/api/jobs/{job_id}").status_code == 204
     assert client.get(f"/api/jobs/{job_id}").status_code == 404
     assert not (data_dir / "jobs" / job_id).exists()
+
+
+def test_upload_rate_limit(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "upload_rate_per_minute", 2)
+    uploads.reset()
+    pdf = make_pdf(tmp_path / "book.pdf", book_pdf)
+    assert _upload(client, pdf).status_code == 202
+    assert _upload(client, pdf).status_code == 202
+    res = _upload(client, pdf)
+    assert res.status_code == 429 and res.headers["retry-after"] == "60"
+    uploads.reset()
+    assert _upload(client, pdf).status_code == 202
+
+
+def test_active_job_cap(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "max_active_jobs", 1)
+    pdf = make_pdf(tmp_path / "book.pdf", book_pdf)
+    job_id = _upload(client, pdf).json()["job_id"]
+    from app import storage
+
+    storage.update_state(job_id, status="processing")  # hold one job open
+    res = _upload(client, pdf)
+    assert res.status_code == 503 and "busy" in res.json()["detail"]
+    storage.update_state(job_id, status="done")
+    assert _upload(client, pdf).status_code == 202
+
+
+def test_basic_auth(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "auth_user", "reader")
+    monkeypatch.setattr(settings, "auth_password", "s3cret")
+    pdf = make_pdf(tmp_path / "book.pdf", book_pdf)
+    res = _upload(client, pdf)
+    assert res.status_code == 401
+    assert res.headers["www-authenticate"].startswith("Basic ")
+    assert client.get("/api/jobs/" + "0" * 32, auth=("reader", "wrong")).status_code == 401
+    assert client.get("/health").status_code == 200  # liveness stays open
+    with pdf.open("rb") as f:
+        res = client.post("/api/jobs", files={"file": ("book.pdf", f, "application/pdf")}, auth=("reader", "s3cret"))
+    assert res.status_code == 202

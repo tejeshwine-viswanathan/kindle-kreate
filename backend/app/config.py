@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     job_workers: int = 2
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # Public-facing hardening. Basic auth protects /api/* when both are set.
+    auth_user: str | None = None
+    auth_password: str | None = None
+    # Uploads per client IP per minute (0 disables), and jobs in flight across all
+    # clients before uploads get a 503 (0 disables).
+    upload_rate_per_minute: int = 10
+    max_active_jobs: int = 20
+    # Take the client IP from X-Forwarded-For (only when behind a proxy you control).
+    trust_proxy: bool = False
+
     # OCR (scanned pages)
     tesseract_cmd: str | None = None  # auto-detected when unset
     ocr_lang: str = "eng"  # Tesseract language codes, e.g. "eng+deu"

@@ -194,6 +194,17 @@ def delete_job(job_id: str) -> None:
     shutil.rmtree(job_dir(job_id), ignore_errors=True)
 
 
+def active_job_count() -> int:
+    """Jobs that are queued or running (across all clients)."""
+    count = 0
+    for path in jobs_root().iterdir():
+        if path.is_dir():
+            state = load_state(path.name)
+            if state and state.status not in ("done", "failed") and not state.cancelled:
+                count += 1
+    return count
+
+
 def purge_expired() -> int:
     cutoff = time.time() - settings.job_ttl_hours * 3600
     removed = 0

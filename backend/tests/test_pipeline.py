@@ -101,3 +101,58 @@ def test_heading_levels_normalized(tmp_path):
     pages = _pages(make_pdf(tmp_path / "h2.pdf", build), tmp_path)
     doc = build_document(pages, fallback_title="h2")
     assert doc.elements[0] == Heading(1, "Only Section")
+
+
+def _page(index, blocks, height=519.0):
+    from app.schema import PageResult
+
+    return PageResult(index=index, width=400, height=height, source="ocr", blocks=blocks)
+
+
+def _text_block(lines):
+    return Block(
+        kind="text",
+        bbox=(min(l.bbox[0] for l in lines), min(l.bbox[1] for l in lines), max(l.bbox[2] for l in lines), max(l.bbox[3] for l in lines)),
+        lines=lines,
+    )
+
+
+def _line(text, y, size=11.0, x=40.0):
+    return Line(text=text, bbox=(x, y, x + 300, y + size), font_size=size)
+
+
+def test_ocr_running_heads_are_stripped():
+    """Headers whose page numbers OCR garbles ("XX1"), headers glued onto the body block,
+    page numbers just outside the old 10% zone, and OCR-noisy header text."""
+    from app.tasks.structure import strip_running_heads
+
+    body = lambda i: [_line(f"Body line {i} one.", 60), _line("Body line two.", 75)]
+    pages = [
+        _page(0, [_text_block([_line("INTRODUCTION xix", 20, 14.2)]), _text_block(body(0))]),
+        _page(1, [_text_block([_line("XX INTRODUCTION", 20), *body(1)])]),  # glued
+        _page(2, [_text_block([_line("INTRODUCTION XX1", 18, 7.9)]), _text_block(body(2))]),
+        _page(3, [_text_block([_line("XXU INTRODUCTI0N", 20), *body(3)])]),  # OCR noise
+        _page(4, [_text_block(body(4)), _text_block([_line("xliti", 500)])]),  # garbled roman page number
+        _page(5, [_text_block(body(5)), _text_block([_line("26", 466)])]),  # 89.8% down the page
+    ]
+    strip_running_heads(pages)
+    texts = [l.text for p in pages for b in p.blocks for l in b.lines]
+    assert all("INTRODUCT" not in t for t in texts), texts
+    assert "xliti" not in texts and "26" not in texts
+    assert texts.count("Body line two.") == 6
+    assert pages[1].blocks[0].bbox[1] == 60  # bbox recomputed after the header line was dropped
+
+
+def test_toc_entries_are_not_headings():
+    from app.tasks.structure import heading_level
+
+    toc = Block(kind="text", bbox=(0, 0, 300, 12), lines=[Line(text="1 Introduction to Deep Learning 4", bbox=(0, 0, 300, 12), font_size=10, bold=True)])
+    assert heading_level(toc, 10.0) is None
+    short_toc = Block(kind="text", bbox=(0, 0, 300, 14), lines=[Line(text="8 Acknowledgments 35", bbox=(0, 0, 300, 14), font_size=12)])
+    assert heading_level(short_toc, 10.0) is None
+    leaders = Block(kind="text", bbox=(0, 0, 300, 14), lines=[Line(text="Abstract ........ 1", bbox=(0, 0, 300, 14), font_size=12)])
+    assert heading_level(leaders, 10.0) is None
+    real = Block(kind="text", bbox=(0, 0, 300, 12), lines=[Line(text="Related Work", bbox=(0, 0, 300, 12), font_size=10, bold=True)])
+    assert heading_level(real, 10.0) == 3
+    numbered = Block(kind="text", bbox=(0, 0, 300, 14), lines=[Line(text="3.2 Attention", bbox=(0, 0, 300, 14), font_size=12)])
+    assert heading_level(numbered, 10.0) == 2

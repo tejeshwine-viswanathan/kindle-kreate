@@ -18,6 +18,14 @@ x-backend: &backend
     PDF2EPUB_MAX_UPLOAD_MB: 500
     PDF2EPUB_JOB_TTL_HOURS: 24
     PDF2EPUB_EPUBCHECK: required
+    # nginx sets X-Forwarded-For, so rate limits apply per real client address
+    PDF2EPUB_TRUST_PROXY: "true"
+    PDF2EPUB_UPLOAD_RATE_PER_MINUTE: 10
+    PDF2EPUB_MAX_ACTIVE_JOBS: 20
+    # Set both to require a login (HTTP Basic) when the stack is reachable from the internet:
+    #   PDF2EPUB_AUTH_USER=me PDF2EPUB_AUTH_PASSWORD=secret docker compose up
+    PDF2EPUB_AUTH_USER: ${PDF2EPUB_AUTH_USER:-}
+    PDF2EPUB_AUTH_PASSWORD: ${PDF2EPUB_AUTH_PASSWORD:-}
   depends_on:
     valkey:
       condition: service_healthy

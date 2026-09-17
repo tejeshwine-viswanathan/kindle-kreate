@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, ThreadPoolExecutor, wait
 from typing import Protocol
@@ -27,8 +28,14 @@ class LocalRunner:
 
     def __init__(self) -> None:
         self.jobs = ThreadPoolExecutor(max_workers=settings.job_workers, thread_name_prefix="job")
+        # spawn (not fork) on every platform: the API process is multi-threaded, and
+        # forking a threaded process can deadlock the child (Python warns about this on Linux).
         self.pages = (
-            ProcessPoolExecutor(max_workers=settings.page_workers, initializer=_init_page_worker)
+            ProcessPoolExecutor(
+                max_workers=settings.page_workers,
+                mp_context=multiprocessing.get_context("spawn"),
+                initializer=_init_page_worker,
+            )
             if settings.page_workers > 0
             else None
         )

@@ -16,6 +16,7 @@ LEFT, RIGHT = 72, 540
 @pytest.fixture(autouse=True)
 def data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", tmp_path / "data")
+    monkeypatch.setattr(settings, "upload_rate_per_minute", 0)  # tests upload freely
     return tmp_path / "data"
 
 
