@@ -2,6 +2,8 @@
 
 Turn PDFs into clean, reflowable EPUBs for your Kindle or e-reader, and EPUBs into printable PDFs. Scanned PDFs are OCR'd. Everything runs on your own machine: no accounts, no paid APIs, no cloud services.
 
+For the full design, architecture decisions and the milestone roadmap, see [PDF to EPUB Project Brief.md](PDF%20to%20EPUB%20Project%20Brief.md).
+
 ## Quick start
 
 With Docker installed:
