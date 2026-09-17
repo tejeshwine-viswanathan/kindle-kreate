@@ -1,0 +1,55 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "API (FastAPI)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--port", "8000"],
+      "cwd": "${workspaceFolder}/backend",
+      "justMyCode": true
+    },
+    {
+      "name": "API (FastAPI, Celery mode)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--port", "8000"],
+      "cwd": "${workspaceFolder}/backend",
+      "env": { "PDF2EPUB_QUEUE": "celery" },
+      "preLaunchTask": "Start Valkey",
+      "justMyCode": true
+    },
+    {
+      "name": "Worker (Celery)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "celery",
+      "args": ["-A", "app.celery_app", "worker", "--loglevel=info", "--pool=threads", "--concurrency=4"],
+      "cwd": "${workspaceFolder}/backend",
+      "env": { "PDF2EPUB_QUEUE": "celery" },
+      "preLaunchTask": "Start Valkey",
+      "justMyCode": true
+    },
+    {
+      "name": "Frontend (Vite)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}/frontend"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full stack",
+      "configurations": ["API (FastAPI)", "Frontend (Vite)"],
+      "stopAll": true
+    },
+    {
+      "name": "Full stack (Celery + Valkey)",
+      "configurations": ["API (FastAPI, Celery mode)", "Worker (Celery)", "Frontend (Vite)"],
+      "stopAll": true
+    }
+  ]
+}

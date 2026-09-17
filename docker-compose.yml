@@ -1,0 +1,63 @@
+# One command runs the whole stack locally: docker compose up --build
+# Then open http://localhost:8080
+#
+#   web     nginx serving the built frontend, proxying /api to the API
+#   api     FastAPI: accepts uploads, reports progress, serves downloads
+#   worker  Celery: one task per page (OCR in parallel), then EPUB assembly + EPUBCheck
+#   valkey  job queue + job state (open-source Redis fork)
+#
+# Scale page throughput with more workers: docker compose up --scale worker=3
+
+x-backend: &backend
+  build: ./backend
+  volumes:
+    - pdf2epub-data:/data
+  environment:
+    PDF2EPUB_QUEUE: celery
+    PDF2EPUB_REDIS_URL: redis://valkey:6379/0
+    PDF2EPUB_MAX_UPLOAD_MB: 500
+    PDF2EPUB_JOB_TTL_HOURS: 24
+    PDF2EPUB_EPUBCHECK: required
+  depends_on:
+    valkey:
+      condition: service_healthy
+
+services:
+  valkey:
+    image: valkey/valkey:8-alpine
+    command: valkey-server --save "" --maxmemory 256mb --maxmemory-policy noeviction
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    <<: *backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  worker:
+    <<: *backend
+    # prefork pool: one process per CPU core, each running one page at a time
+    command: celery -A app.celery_app worker --loglevel=info
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.celery_app inspect ping -d celery@$$HOSTNAME --timeout 10"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  web:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pdf2epub-data:

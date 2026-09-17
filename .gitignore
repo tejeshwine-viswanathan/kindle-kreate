@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project
+node_modules/
+backend/data/
+*.tsbuildinfo
+
+# Downloaded tools (scripts/fetch_epubcheck.py)
+backend/tools/

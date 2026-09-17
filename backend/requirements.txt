@@ -1,0 +1,21 @@
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+python-multipart==0.0.32
+pydantic==2.13.5
+pydantic-settings==2.15.0
+pymupdf==1.28.2
+EbookLib==0.20
+
+# OCR path (scanned pages); also needs the Tesseract binary, see README
+pytesseract==0.3.13
+opencv-python-headless==5.0.0.93
+numpy==2.5.3
+
+# job queue (PDF2EPUB_QUEUE=celery); also needs Valkey or Redis
+celery==5.6.3
+redis==6.4.0
+
+# dev / test
+pytest==9.1.1
+httpx==0.28.1
+fakeredis==2.38.0

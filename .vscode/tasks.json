@@ -1,0 +1,16 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start Valkey",
+      "detail": "Starts (or creates) the kindle-kreate-valkey Docker container on localhost:6379",
+      "type": "shell",
+      "command": "docker start kindle-kreate-valkey 2>/dev/null || docker run -d --name kindle-kreate-valkey -p 6379:6379 valkey/valkey:8-alpine",
+      "windows": {
+        "command": "docker start kindle-kreate-valkey; if (-not $?) { docker run -d --name kindle-kreate-valkey -p 6379:6379 valkey/valkey:8-alpine }"
+      },
+      "presentation": { "reveal": "silent", "close": true },
+      "problemMatcher": []
+    }
+  ]
+}
